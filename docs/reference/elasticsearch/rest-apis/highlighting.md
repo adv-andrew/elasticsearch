@@ -1204,3 +1204,167 @@ and will format with the tags <em> and </em> all matches in this string using th
 I'll be the <em>only</em> <em>fox</em> in the world for you.
 ```
 This kind of formatted strings are the final result of the highlighter returned to the user.
+
+
+## Python DSL Highlighting Implementation [python-dsl-highlighting]
+
+When using the Elasticsearch Python DSL, highlighting can be implemented in several ways. Here are some common patterns and best practices:
+
+### Basic Highlighting
+
+```python
+from elasticsearch_dsl import Search
+
+# Basic highlighting
+s = Search()
+s = s.highlight('title', 'content')  # Highlight matches in title and content fields
+```
+
+### Advanced Highlighting Configuration
+
+```python
+# Configure global highlighting options
+s = s.highlight_options(
+    order='score',              # Sort fragments by relevance score
+    encoder='html',             # HTML encode the highlighted text
+    require_field_match=True    # Only highlight fields that match the query
+)
+
+# Field-specific highlighting
+s = s.highlight(
+    'title',
+    fragment_size=200,          # Size of each highlight fragment
+    number_of_fragments=3,      # Maximum number of fragments per field
+    pre_tags=['<mark>'],        # Custom highlight start tag
+    post_tags=['</mark>']       # Custom highlight end tag
+).highlight(
+    'content',
+    fragment_size=150,          # Smaller fragments for content
+    number_of_fragments=5,      # More fragments for longer content
+    boundary_scanner='sentence' # Break fragments at sentence boundaries
+)
+```
+
+### Accessing Highlighted Results
+
+When accessing highlighted results in Python, you'll need to handle the `AttrList` objects that Elasticsearch returns. Here's how to properly access and process highlights:
+
+```python
+# Process highlighted results
+for hit in response:
+    if hasattr(hit.meta, 'highlight'):
+        highlight_info = {}
+        # Convert AttrList to regular Python list for JSON serialization
+        if hasattr(hit.meta.highlight, 'title'):
+            highlight_info['title'] = list(hit.meta.highlight.title)
+        if hasattr(hit.meta.highlight, 'content'):
+            highlight_info['content'] = list(hit.meta.highlight.content)
+```
+
+### Common Pitfalls and Solutions
+
+1. **JSON Serialization Issues**
+   - Problem: `AttrList` objects are not JSON serializable
+   - Solution: Convert highlights to regular Python lists using `list()`
+
+2. **Field Names with Dots**
+   - Problem: Accessing fields with dots in their names
+   - Solution: Use bracket notation: `hit.meta.highlight['field.name']`
+
+3. **Missing Highlights**
+   - Problem: Fields might not have highlights if they don't match the query
+   - Solution: Always check for highlight existence using `hasattr()`
+
+### Best Practices
+
+1. **Field Selection**
+   ```python
+   # Only highlight fields that are likely to contain relevant matches
+   s = s.highlight('title', 'content', 'description')
+   ```
+
+2. **Fragment Size**
+   ```python
+   # Adjust fragment size based on content type
+   s = s.highlight('title', fragment_size=50)  # Short for titles
+   s = s.highlight('content', fragment_size=150)  # Longer for content
+   ```
+
+3. **Custom Tags**
+   ```python
+   # Use semantic HTML tags for better styling
+   s = s.highlight(
+       'content',
+       pre_tags=['<mark class="highlight">'],
+       post_tags=['</mark>']
+   )
+   ```
+
+4. **Boundary Control**
+   ```python
+   # Use sentence boundaries for natural text breaks
+   s = s.highlight(
+       'content',
+       boundary_scanner='sentence',
+       fragment_size=150
+   )
+   ```
+
+### Complete Example
+
+Here's a complete example showing how to implement highlighting in a search application:
+
+```python
+from elasticsearch_dsl import Search
+from elasticsearch_dsl.query import Match
+
+def search_with_highlights(query_text):
+    s = Search()
+    
+    # Add the search query
+    s = s.query(Match(content=query_text))
+    
+    # Configure highlighting
+    s = s.highlight_options(
+        order='score',
+        encoder='html'
+    )
+    
+    # Add field-specific highlighting
+    s = s.highlight(
+        'title',
+        fragment_size=50,
+        number_of_fragments=1,
+        pre_tags=['<mark>'],
+        post_tags=['</mark>']
+    ).highlight(
+        'content',
+        fragment_size=150,
+        number_of_fragments=3,
+        boundary_scanner='sentence'
+    )
+    
+    # Execute search
+    response = s.execute()
+    
+    # Process results
+    results = []
+    for hit in response:
+        result = {
+            'title': hit.title,
+            'content': hit.content,
+            'score': hit.meta.score
+        }
+        
+        # Add highlights if available
+        if hasattr(hit.meta, 'highlight'):
+            result['highlights'] = {}
+            if hasattr(hit.meta.highlight, 'title'):
+                result['highlights']['title'] = list(hit.meta.highlight.title)
+            if hasattr(hit.meta.highlight, 'content'):
+                result['highlights']['content'] = list(hit.meta.highlight.content)
+        
+        results.append(result)
+    
+    return results
+```
